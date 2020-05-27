@@ -59,11 +59,13 @@ namespace Microsoft.EntityFrameworkCore.Query
 
             VerifyNoClientConstant(shapedQueryExpression.ShaperExpression);
             var nonComposedFromSql = selectExpression.IsNonComposedFromSql();
-            var shaper = new ShaperProcessingExpressionVisitor(this, selectExpression, nonComposedFromSql).ProcessShaper(
-                shapedQueryExpression.ShaperExpression, out var relationalCommandCache);
+            var splitQuery = ((RelationalQueryCompilationContext)QueryCompilationContext).IsSplitQuery;
+            var shaper = new ShaperProcessingExpressionVisitor(this, selectExpression, splitQuery, nonComposedFromSql).ProcessShaper(
+                shapedQueryExpression.ShaperExpression, out var relationalCommandCache, out var relatedDataLoaders);
 
-            return nonComposedFromSql
-                ? Expression.New(
+            if (nonComposedFromSql)
+            {
+                return Expression.New(
                     typeof(FromSqlQueryingEnumerable<>).MakeGenericType(shaper.ReturnType).GetConstructors()[0],
                     Expression.Convert(QueryCompilationContext.QueryContextParameter, typeof(RelationalQueryContext)),
                     Expression.Constant(relationalCommandCache),
@@ -71,8 +73,36 @@ namespace Microsoft.EntityFrameworkCore.Query
                         typeof(IReadOnlyList<string>)),
                     Expression.Constant(shaper.Compile()),
                     Expression.Constant(_contextType),
-                    Expression.Constant(base.QueryCompilationContext.PerformIdentityResolution))
-                : Expression.New(
+                    Expression.Constant(QueryCompilationContext.PerformIdentityResolution));
+            }
+
+            if (splitQuery)
+            {
+                if (QueryCompilationContext.IsAsync)
+                {
+                    return Expression.New(
+                        typeof(SplitQueryingEnumerable<>).MakeGenericType(shaper.ReturnType).GetConstructors()
+                            .Single(ci => ci.GetParameters()[3].ParameterType.GetGenericTypeDefinition() == typeof(Func<,,>)),
+                        Expression.Convert(QueryCompilationContext.QueryContextParameter, typeof(RelationalQueryContext)),
+                        Expression.Constant(relationalCommandCache),
+                        Expression.Constant(shaper.Compile()),
+                        Expression.Constant(relatedDataLoaders.Compile()),
+                        Expression.Constant(_contextType),
+                        Expression.Constant(QueryCompilationContext.PerformIdentityResolution));
+                }
+
+                return Expression.New(
+                    typeof(SplitQueryingEnumerable<>).MakeGenericType(shaper.ReturnType).GetConstructors()
+                        .Single(ci => ci.GetParameters()[3].ParameterType.GetGenericTypeDefinition() == typeof(Action<,>)),
+                    Expression.Convert(QueryCompilationContext.QueryContextParameter, typeof(RelationalQueryContext)),
+                    Expression.Constant(relationalCommandCache),
+                    Expression.Constant(shaper.Compile()),
+                    Expression.Constant(relatedDataLoaders.Compile()),
+                    Expression.Constant(_contextType),
+                    Expression.Constant(QueryCompilationContext.PerformIdentityResolution));
+            }
+
+            return Expression.New(
                     typeof(QueryingEnumerable<>).MakeGenericType(shaper.ReturnType).GetConstructors()[0],
                     Expression.Convert(QueryCompilationContext.QueryContextParameter, typeof(RelationalQueryContext)),
                     Expression.Constant(relationalCommandCache),
