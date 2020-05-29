@@ -363,6 +363,45 @@ namespace Microsoft.EntityFrameworkCore.Query
                 });
         }
 
+        [ConditionalTheory]
+        [MemberData(nameof(IsAsyncData))]
+        public virtual Task Group_by_with_projection_into_DTO(bool async)
+        {
+            return AssertQuery(
+                async,
+                ss => ss.Set<Order>().GroupBy(o => o.OrderID).Select(x => new LongIntDto { Id = x.Key, Count = x.Count() }),
+                elementSorter: e => e.Id,
+                elementAsserter: (e, a) =>
+                {
+                    Assert.Equal(e.Id, a.Id);
+                    Assert.Equal(e.Count, a.Count);
+                });
+        }
+
+        private class LongIntDto
+        {
+            public long Id { get; set; }
+            public int Count { get; set; }
+        }
+
+        [ConditionalTheory]
+        [MemberData(nameof(IsAsyncData))]
+        public virtual async Task Where_select_function_groupby_followed_by_another_select_with_aggregates(bool async)
+        {
+            await AssertQuery(
+                async,
+                ss => ss.Set<Order>()
+                    .Where(o => o.CustomerID.StartsWith("A"))
+                    .Select(o => new { o.CustomerID, Age = 2020 - o.OrderDate.Value.Year, o.OrderID })
+                    .GroupBy(x => x.CustomerID)
+                    .Select(x => new
+                    {
+                        x.Key,
+                        Sum1 = x.Sum(y => y.Age <= 30 ? y.OrderID : 0),
+                        Sum2 = x.Sum(y => y.Age > 30 && y.Age <= 60 ? y.OrderID : 0)
+                    }));
+        }
+
         #endregion
 
         #region GroupByAnonymousAggregate
@@ -998,6 +1037,19 @@ namespace Microsoft.EntityFrameworkCore.Query
                 elementSorter: e => e.Key);
         }
 
+        [ConditionalTheory]
+        [MemberData(nameof(IsAsyncData))]
+        public virtual Task Join_groupby_anonymous_orderby_anonymous_projection(bool async)
+        {
+            return AssertQuery(
+                async,
+                ss => from c in ss.Set<Customer>()
+                      join o in ss.Set<Order>() on c.CustomerID equals o.CustomerID
+                      group new { c, o } by new { c.CustomerID, o.OrderDate } into grouping
+                      orderby grouping.Key.OrderDate
+                      select new { grouping.Key.CustomerID, grouping.Key.OrderDate });
+        }
+
         #endregion
 
         #region GroupByWithElementSelectorAggregate
@@ -1538,6 +1590,25 @@ namespace Microsoft.EntityFrameworkCore.Query
                         g => new { g.Key, Count = g.Count() }));
         }
 
+        [ConditionalTheory]
+        [MemberData(nameof(IsAsyncData))]
+        public virtual Task GroupBy_after_anonymous_projection_and_distinct_followed_by_another_anonymous_projection(bool async)
+        {
+            return AssertQuery(
+                async,
+                ss => ss.Set<Order>()
+                    .Select(o => new { o.CustomerID, o.OrderID })
+                    .Distinct()
+                    .GroupBy(x => new { x.CustomerID })
+                    .Select(g => new { Key = g.Key.CustomerID, Count = g.Count() }),
+                elementSorter: e => (e.Key, e.Count),
+                elementAsserter: (e, a) =>
+                {
+                    Assert.Equal(e.Key, a.Key);
+                    Assert.Equal(e.Count, a.Count);
+                });
+        }
+
         #endregion
 
         #region GroupByAggregateComposition
@@ -2006,6 +2077,41 @@ namespace Microsoft.EntityFrameworkCore.Query
             return AssertQueryScalar(
                 async,
                 ss => ss.Set<Order>().GroupBy(o => o.CustomerID).Select(g => g.LongCount(o => o.OrderID < 10300)));
+        }
+
+        [ConditionalTheory]
+        [MemberData(nameof(IsAsyncData))]
+        public virtual Task GroupBy_orderby_projection_with_coalesce_operation(bool async)
+        {
+            return AssertQuery(
+                async,
+                ss => ss.Set<Customer>()
+                    .GroupBy(c => c.City)
+                    .OrderByDescending(x => x.Count())
+                    .ThenBy(x => x.Key)
+                    .Select(x => new
+                    {
+                        Locality = x.Key ?? "Unknown",
+                        Count = x.Count()
+                    }));
+        }
+
+        [ConditionalTheory(Skip = "issue #18923")]
+        [MemberData(nameof(IsAsyncData))]
+        public virtual Task GroupBy_let_orderby_projection_with_coalesce_operation(bool async)
+        {
+            return AssertQuery(
+                async,
+                ss => ss.Set<Customer>()
+                    .GroupBy(c => c.City)
+                    .Select(g => new { citiesCount = g.Count(), g })
+                    .OrderByDescending(x => x.citiesCount)
+                    .ThenBy(x => x.g.Key)
+                    .Select(x => new
+                    {
+                        Locality = x.g.Key ?? "Unknown",
+                        Count = x.citiesCount
+                    }));
         }
 
         #endregion
