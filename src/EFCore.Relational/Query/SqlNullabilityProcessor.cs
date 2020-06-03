@@ -1058,7 +1058,8 @@ namespace Microsoft.EntityFrameworkCore.Query
             }
 
             if (TryGetBoolConstantValue(right) is bool rightBoolValue
-                && !leftNullable)
+                && !leftNullable
+                && left.TypeMapping.Converter == null)
             {
                 nullable = leftNullable;
 
@@ -1073,7 +1074,8 @@ namespace Microsoft.EntityFrameworkCore.Query
             }
 
             if (TryGetBoolConstantValue(left) is bool leftBoolValue
-                && !rightNullable)
+                && !rightNullable
+                && right.TypeMapping.Converter == null)
             {
                 nullable = rightNullable;
 
